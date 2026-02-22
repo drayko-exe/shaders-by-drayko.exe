@@ -6,95 +6,85 @@ local player = Players.LocalPlayer
 local assetId = 17279880951
 
 -----------------------------
--- 1. TRANSFORMAÇÃO ÚNICA (RODA APENAS 1 VEZ)
+-- 1. FUNÇÃO DE TRANSFORMAÇÃO
 -----------------------------
--- Usamos uma variável global para o script não tentar processar o mapa todo de novo ao resetar
-if not _G.MapProcessed then
-    _G.MapProcessed = true
-    task.spawn(function()
-        local count = 0
-        for _, obj in pairs(Workspace:GetDescendants()) do
-            if obj:IsA("BasePart") then
-                obj.Material = Enum.Material.SmoothPlastic
-                if obj.Transparency == 0 then
-                    obj.Reflectance = 0.6
-                end
-            end
-            count = count + 1
-            if count >= 500 then
-                count = 0
-                task.wait() 
-            end
+-- Criamos uma função separada para poder chamar tanto no início quanto quando algo novo surgir
+local function processObject(obj)
+    if obj:IsA("BasePart") then
+        obj.Material = Enum.Material.SmoothPlastic
+        if obj.Transparency == 0 then
+            obj.Reflectance = 0.6
         end
-    end)
+    end
 end
 
+-- Processa o que já existe
+task.spawn(function()
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        processObject(obj)
+    end
+end)
+
+-- ESCUTADOR: Toda vez que o mapa mudar ou algo novo for criado, ele limpa/transforma
+Workspace.DescendantAdded:Connect(function(obj)
+    processObject(obj)
+end)
+
 -----------------------------
--- 2. LIMPEZA E ASSETID
+-- 2. ILUMINAÇÃO REUTILIZÁVEL
 -----------------------------
 local function applyLighting()
-    -- Limpa apenas o necessário para não bugar a câmera
+    -- Limpa efeitos antigos para não acumular
     for _, obj in pairs(Lighting:GetChildren()) do
         if obj:IsA("Sky") or obj:IsA("BloomEffect") or obj:IsA("Atmosphere") or obj:IsA("Clouds") then
             obj:Destroy()
         end
     end
 
-    local success, objects = pcall(function()
-        return game:GetObjects("rbxassetid://" .. assetId)
-    end)
-
-    if success and objects then
+    -- Carrega Asset
+    pcall(function()
+        local objects = game:GetObjects("rbxassetid://" .. assetId)
         for _, item in ipairs(objects) do
             item.Parent = Lighting
         end
-    end
+    end)
 
-    -- Configurações de Iluminação
+    -- Configurações de Iluminação (Forçadas)
     Lighting.Technology = Enum.Technology.Future
     Lighting.Brightness = 2.2
     Lighting.GlobalShadows = true
     Lighting.OutdoorAmbient = Color3.fromRGB(170, 130, 255)
-    Lighting.Ambient = Color3.fromRGB(90, 90, 110)
-
-    -- Sky de segurança para a cabeça não ficar preta
+    
+    -- Garante que o Sky permaneça mesmo se o mapa mudar
     if not Lighting:FindFirstChildOfClass("Sky") then
         local sky = Instance.new("Sky", Lighting)
         sky.SkyboxUp = "rbxassetid://159067921"
-        sky.SkyboxBk = "rbxassetid://0"
-        sky.SkyboxDn = "rbxassetid://0"
-        sky.SkyboxFt = "rbxassetid://0"
-        sky.SkyboxLf = "rbxassetid://0"
-        sky.SkyboxRt = "rbxassetid://0"
         sky.SunAngularSize = 0
     end
-
-    -- Atmosfera e Nuvens
-    local clouds = Instance.new("Clouds", Workspace.Terrain)
-    clouds.Color = Color3.fromRGB(210, 60, 255)
-    clouds.Cover = 0.8
-    
-    local atmosphere = Instance.new("Atmosphere", Lighting)
-    atmosphere.Density = 0.3
-    atmosphere.Color = Color3.fromRGB(150, 60, 255)
-
-    local bloom = Instance.new("BloomEffect", Lighting)
-    bloom.Intensity = 0.5
-    bloom.Threshold = 0.85
 end
 
+-- Aplica a primeira vez
 applyLighting()
 
+-- Se o jogo resetar a iluminação (comum em mudanças de mapa), ele reaplica
+Lighting.Changed:Connect(function(prop)
+    if prop == "Brightness" or prop == "ClockTime" then
+        -- Pequeno delay para não dar lag se o jogo mudar muitas propriedades de uma vez
+        task.wait(1) 
+        if Lighting.Brightness ~= 2.2 then
+            applyLighting()
+        end
+    end
+end)
+
 -----------------------------
--- 3. OUTLINE (SISTEMA SEGURO PARA RESET)
+-- 3. OUTLINE (PERSONAGEM)
 -----------------------------
 local function addOutline(character)
     if not character then return end
-    -- Espera o personagem carregar totalmente para não bugar o spawn
     local humanoid = character:WaitForChild("Humanoid", 10)
-    if not humanoid then return end
-
-    -- Remove highlights antigos para não acumular memória
+    
+    -- Limpeza de Highlights antigos
     for _, old in pairs(character:GetChildren()) do
         if old:IsA("Highlight") then old:Destroy() end
     end
@@ -103,11 +93,9 @@ local function addOutline(character)
     highlight.Name = "SkinOutline"
     highlight.FillTransparency = 1
     highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-    highlight.OutlineTransparency = 0
     highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
     highlight.Parent = character
 end
 
--- Conecta de forma segura
 player.CharacterAdded:Connect(addOutline)
 if player.Character then addOutline(player.Character) end
